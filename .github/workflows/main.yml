@@ -40,7 +40,7 @@ jobs:
     - name: Test with pytest
       run: |
         export SPS_HOME="/opt/hostedtoolcache/Python/fsps"
-	python -m pytest --cov=rail.creation.sed_generation --cov-report=xml
+        python -m pytest --cov=rail.creation.sed_generation --cov-report=xml
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v1
       with:
