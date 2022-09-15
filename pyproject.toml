@@ -42,7 +42,7 @@ write_to = "src/rail/creation/sed_generation/_version.py"
 
 [tool.setuptools.package-data]
 "rail.examples.estimation.data.AB" = ["*.AB"]
-"rail.examples.testdata" = ["test_fsps_sed.fits"]
+"rail.examples.testdata" = ["test_fsps_sed.fits", "*.dat"]
 
 [tool.coverage.run]
 source = ["src/rail"]
