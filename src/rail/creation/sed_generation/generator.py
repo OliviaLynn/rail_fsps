@@ -1,7 +1,7 @@
 """ Abstract base class defining a generator
 
 The key feature is that the __call__ method takes a TableHandle and
-and returns a FitsHandle, and wraps the run method
+returns a FitsHandle, and wraps the run method
 """
 
 from rail.core.stage import RailStage
