@@ -25,7 +25,8 @@ class SedGenerator(RailStage):
         """Initialize Generator that can create rest-frame SEDs"""
         RailStage.__init__(self, args, comm=comm)
 
-    def __call__(self, sample, seed: int = None, physical_units=True, tabulated_sfh_file=None, tabulated_lsf_file=None):
+    def __call__(self, sample, seed: int = None, physical_units=True, tabulated_sfh_file=None, 
+                 tabulated_lsf_file=None): # pragma: no cover
         """The main interface method for `Generator`
 
         Generate SEDs.
