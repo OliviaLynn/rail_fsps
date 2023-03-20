@@ -3,7 +3,7 @@ if "SPS_HOME" not in os.environ:
     os.environ["SPS_HOME"] = "/opt/hostedtoolcache/Python/fsps"
 
 import tables_io
-from rail.creation.sed_generation import FSPSSedGenerator
+from rail.creation.galaxy_modelling import FSPSSedGenerator
 import pytest
 from rail.core.stage import RailStage
 import numpy as np
