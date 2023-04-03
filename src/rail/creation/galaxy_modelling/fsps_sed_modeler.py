@@ -1,6 +1,6 @@
 from rail.creation.engine import Modeler
 from rail.core.stage import RailStage
-from rail.core.data import ModelHandle
+from rail.core.data import ModelHandle, Hdf5Handle
 from ceci.config import StageParameter as Param
 import fsps
 import numpy as np
@@ -24,8 +24,16 @@ class FSPSSedModeler(Modeler):
     name = "FSPS_sed_model"
     config_options = RailStage.config_options.copy()
     config_options.update(zcontinuous=Param(int, 1, msg='Flag for interpolation in metallicity of SSP before CSP'),
+                          add_agb_dust_model=Param(bool, True,
+                                                   msg='Turn on/off adding AGB circumstellar dust contribution to SED'),
+                          add_dust_emission=Param(bool, True,
+                                                  msg='Turn on/off adding dust emission contribution to SED'),
+                          add_igm_absorption=Param(bool, False,
+                                                   msg='Turn on/off adding IGM absorption contribution to SED'),
                           add_neb_emission=Param(bool, False, msg='Turn on/off nebular emission model based on Cloudy'),
                           add_neb_continuum=Param(bool, False, msg='Turn on/off nebular continuum component'),
+                          add_stellar_remnants=Param(bool, True, msg='Turn on/off adding stellar remnants contribution '
+                                                                     'to stellar mass'),
                           nebemlineinspec=Param(bool, False, msg='True to include emission line fluxes in spectrum'),
                           smooth_velocity=Param(bool, True, msg='True/False for smoothing in '
                                                                 'velocity/wavelength space'),
@@ -37,51 +45,54 @@ class FSPSSedModeler(Modeler):
                           sfh_type=Param(int, 0, msg='star-formation history type, see FSPS manual, default SSP'),
                           dust_type=Param(int, 2, msg='attenuation curve for dust type, see FSPS manual, '
                                                       'default Calzetti'),
-                          galaxy_metallicities=Param(str, 'galaxy_metallicities.npy',
-                                                     msg='npy file containing the metallicity values in units of '
-                                                     'log10(Z / Zsun)'),
-                          galaxy_ages=Param(str, 'galaxy_ages.npy', msg='npy file containing the age values in units'
-                                                                        'of Gyr'),
-                          galaxy_vel_disp=Param(str, 'None', msg='Default to None, otherwise npy file containing the '
-                                                                 'velocity dispersion values in units of km/s'),
-                          gas_ionization_params=Param(str, 'None', msg='Default to None, npy file containing the gas '
-                                                                       'ionization parameters values'),
-                          gas_metallicity_params=Param(str, 'None', msg='Default to None, npy file containing the gas '
-                                                                        'metallicities values in units of'
-                                                                        ' log10(Z / Zsun)'),
-                          dust_birth_cloud_params=Param(str, 'None', msg='Default to None, npy file containing the'
-                                                                         'dust parameters describing the attenuation '
-                                                                         'of young stellar light'),
-                          dust_diffuse_params=Param(str, 'None', msg='Default to None, npy file containing the '
-                                                                     'dust parameters describing the attenuation of '
-                                                                     'old stellar light'),
-                          dust_powerlaw_modifier_params=Param(str, 'None', msg='Default to None, npy file containing'
-                                                                               'the power-law modifiers to the shape '
-                                                                               'of the Calzetti et al. (2000) '
-                                                                               'attenuation curve'),
-                          dust_emission_gamma_params=Param(str, 'None', msg='Default to None, npy file containing the'
-                                                                            ' Relative contributions of dust heated at'
-                                                                            ' Umin, parameter of Draine and Li (2007) '
-                                                                            'dust emission model'),
-                          dust_emission_umin_params=Param(str, 'None', msg='Default to None, npy file containing the'
-                                                                           ' Minimum radiation field strengths, '
-                                                                           'parameter of Draine and Li (2007) dust '
-                                                                           'emission model'),
-                          dust_emission_qpah_params=Param(str, 'None', msg='Default to None, npy file containing the'
-                                                                           ' Grain size distributions in mass in PAHs, '
-                                                                           'parameter of Draine and Li (2007) dust '
-                                                                           'emission model'),
-                          fraction_agn_bol_lum_params=Param(str, 'None', msg='Default to None, npy file containing the'
-                                                                             ' Fractional contributions of AGN wrt '
-                                                                             'stellar bolometric luminosity'),
-                          agn_torus_opt_depth_params=Param(str, 'None', msg='Default to None, npy file containing the'
-                                                                            'Optical depths of the AGN dust torii'),
+                          tabulated_sfh_key = Param(str, 'tabulated_sfh', msg='tabulated SFH dataset keyword name'),
+                          redshifts_key = Param(str, 'redshift', msg='Redshift dataset keyword name'),
+                          stellar_metallicities_key=Param(str, 'stellar_metallicity',
+                                                     msg='galaxy stellar metallicities (log10(Z / Zsun)) '
+                                                         'dataset keyword name'),
+                          stellar_ages_key=Param(str, 'stellar_age', msg='galaxy stellar ages (Gyr) '
+                                                                         'dataset keyword name'),
+                          velocity_dispersions_key=Param(str, 'stellar_velocity_dispersion',
+                                                         msg='stellar velocity dispersions (km/s) '
+                                                             'dataset keyword name'),
+                          gas_ionizations_key=Param(str, 'gas_ionization',
+                                                          msg='gas ionization values dataset keyword name'),
+                          gas_metallicities_key=Param(str, 'gas_metallicity',
+                                                      msg='gas metallicities (log10(Zgas / Zsun)) dataset '
+                                                          'keyword name'),
+                          dust_birth_cloud_key=Param(str, 'dust1_birth_cloud',
+                                                        msg='dust parameter describing young stellar light attenuation '
+                                                            '(dust1 in FSPS) dataset keyword name'),
+                          dust_diffuse_key=Param(str, 'dust2_diffuse', msg='dust parameters describing old stellar '
+                                                                              'light attenuation (dust2 in FSPS) '
+                                                                              'dataset keyword name'),
+                          dust_powerlaw_modifier_key=Param(str, 'dust_calzetti_modifier',
+                                                              msg='power-law modifiers to the shape of the '
+                                                                  'Calzetti et al. (2000) attenuation curve '
+                                                                  'dataset keyword name'),
+                          dust_emission_gamma_key=Param(str, 'dust_gamma',
+                                                           msg='Relative contributions of dust heated at Umin, '
+                                                               'parameter of Draine and Li (2007) dust emission model'
+                                                               'dataset keyword name'),
+                          dust_emission_umin_key=Param(str, 'dust_umin',
+                                                          msg='Minimum radiation field strengths, parameter of '
+                                                              'Draine and Li (2007) dust emission model, '
+                                                              'dataset keyword name'),
+                          dust_emission_qpah_key=Param(str, 'dust_qpah',
+                                                          msg='Grain size distributions in mass in PAHs, '
+                                                              'parameter of Draine and Li (2007) dust emission model,'
+                                                              'dataset keyword name'),
+                          fraction_agn_bol_lum_key=Param(str, 'f_agn',
+                                                            msg='Fractional contributions of AGN wrt stellar bolometric'
+                                                                ' luminosity, dataset keyword name'),
+                          agn_torus_opt_depth_key=Param(str, 'tau_agn', msg='Optical depths of the AGN dust torii'
+                                                                               ' dataset keyword name'),
                           physical_units=Param(bool, False), msg='False (True) for rest-frame spectra in units of'
                                                                  'Lsun/Hz (erg/s/Hz)')
 
-    # inputs = [("input", DataHandle)]
+    inputs = [("input", Hdf5Handle)]
     # outputs = [("model", ModelHandle)]
-    outputs = [("model", ModelHandle)]
+    outputs = [("model", Hdf5Handle)]
 
     def __init__(self, args, comm=None):
         """
@@ -101,76 +112,34 @@ class FSPSSedModeler(Modeler):
             raise ValueError("max_wavelength must be positive and greater than min_wavelength,"
                              " not {self.config.max_wavelength}")
 
-        self.ages = np.load(self.config.galaxy_ages)
-        self.metallicities = np.load(self.config.galaxy_metallicities)
+        if self.config.zcontinuous not in [0, 1, 2, 3]:
+            raise ValueError("zcontinous={} is not valid, allowed values are 0,1,2,3".format(self.config.zcontinuous))
 
-        if self.config.galaxy_vel_disp == 'None':
-            self.velocity_dispersions = np.full(len(self.ages), 0.)  # default value in km/s in FSPS
-        else:
-            self.velocity_dispersions = np.load(self.config.galaxy_vel_disp)
+        if self.config.imf_type not in [0, 1, 2, 3, 4, 5]:
+            raise ValueError("imf_type={} is not valid, allowed values are 0,1,2,3,4,5".format(self.config.imf_type))
 
-        if self.config.gas_ionization_params == 'None':
-            self.gas_ionizations = np.full(len(self.ages), -2.)  # default value in FSPS
-        else:
-            self.gas_ionizations = np.load(self.config.gas_ionization_params)
+        if self.config.sfh_type not in [0, 1, 3, 4, 5]:
+            raise ValueError("sfh_type={} is not valid, allowed values are 0,1,2,3,4,5".format(self.config.sfh_type))
 
-        if self.config.gas_metallicity_params == 'None':
-            self.gas_metallicities = self.metallicities.copy()
-        else:
-            self.gas_metallicities = np.load(self.config.gas_metallicity_params)
+        if self.config.dust_type not in [0, 1, 2, 3, 4, 5, 6]:
+            raise ValueError("dust_type={} is not valid, allowed values are 0,1,2,3,4,5,6"
+                             .format(self.config.dust_type))
 
-        if self.config.dust_birth_cloud_params == 'None':
-            self.dust_birth_cloud = np.full(len(self.ages), 0.)  # default value in FSPS
-        else:
-            self.dust_birth_cloud = np.load(self.config.dust_birth_cloud_params)
-
-        if self.config.dust_diffuse_params == 'None':
-            self.dust_diffuse = np.full(len(self.ages), 0.)  # default value in FSPS
-        else:
-            self.dust_diffuse = np.load(self.config.dust_diffuse_params)
-
-        if self.config.dust_powerlaw_modifier_params == 'None':
-            self.dust_powerlaw_modifier = np.full(len(self.ages), -1.)  # default value in FSPS
-        else:
-            self.dust_powerlaw_modifier = np.load(self.config.dust_powerlaw_modifier_params)
-
-        if self.config.dust_emission_gamma_params == 'None':
-            self.dust_emission_gamma = np.full(len(self.ages), 0.01)  # default value in FSPS
-        else:
-            self.dust_emission_gamma = np.load(self.config.dust_emission_gamma_params)
-
-        if self.config.dust_emission_umin_params == 'None':
-            self.dust_emission_umin = np.full(len(self.ages), 1.0)  # default value in FSPS
-        else:
-            self.dust_emission_umin = np.load(self.config.dust_emission_umin_params)
-
-        if self.config.dust_emission_qpah_params == 'None':
-            self.dust_emission_qpah = np.full(len(self.ages), 3.5)  # default value in FSPS
-        else:
-            self.dust_emission_qpah = np.load(self.config.dust_emission_qpah_params)
-
-        if self.config.fraction_agn_bol_lum_params == 'None':
-            self.fraction_agn_bol_lum = np.full(len(self.ages), 0.)  # default value in FSPS
-        else:
-            self.fraction_agn_bol_lum = np.load(self.config.fraction_agn_bol_lum_params)
-
-        if self.config.agn_torus_opt_depth_params == 'None':
-            self.agn_torus_opt_depth = np.full(len(self.ages), 10)  # default value in FSPS
-        else:
-            self.agn_torus_opt_depth = np.load(self.config.agn_torus_opt_depth_params)
-
-    def _get_rest_frame_seds(self, compute_vega_mags=False, vactoair_flag=False, add_agb_dust_model=True,
-                             add_dust_emission=True, add_igm_absorption=False, add_stellar_remnants=True,
-                             compute_light_ages=False, cloudy_dust=False, agb_dust=1.0, tpagb_norm_type=2,
-                             dell=0.0, delt=0.0, redgb=1.0, agb=1.0, fcstar=1.0, fbhb=0.0, sbss=0.0, pagb=1.0,
-                             zmet=1, pmetals=2.0, imf_upper_limit=120, imf_lower_limit=0.08,
-                             imf1=1.3, imf2=2.3, imf3=2.3, vdmc=0.08, mdave=0.5, evtype=-1, use_wr_spectra=1,
-                             logt_wmb_hot=0.0, masscut=150.0, igm_factor=1.0, tau=np.ones(1),
-                             const=np.zeros(1), sf_start=np.zeros(1), sf_trunc=np.zeros(1), fburst=np.zeros(1),
-                             tburst=np.ones(1), sf_slope=np.zeros(1), dust_tesc=7.0, dust_clumps=-99.,
-                             frac_nodust=0.0, frac_obrun=0.0, dust_index=-0.7, mwr=3.1, uvb=1.0, wgp1=1,
-                             wgp2=1, wgp3=1, physical_units=True, zred=None, tabulated_sfh_file=None,
-                             tabulated_lsf_file=None):
+    def _get_rest_frame_seds(self, compute_vega_mags=False, vactoair_flag=False, zcontinuous=0, add_agb_dust_model=True,
+                             add_dust_emission=True, add_igm_absorption=False, add_neb_emission=False,
+                             add_neb_continuum=True, add_stellar_remnants=True, redshift_colors=False,
+                             compute_light_ages=False, nebemlineinspec=True, smooth_velocity=True,
+                             smooth_lsf=False, cloudy_dust=False, agb_dust=1.0, tpagb_norm_type=2, dell=0.0,
+                             delt=0.0, redgb=1.0, agb=1.0, fcstar=1.0, fbhb=0.0, sbss=0.0, pagb=1.0, zred=0.0,
+                             zmet=1, logzsol=0.0, pmetals=2.0, imf_type=2, imf_upper_limit=120, imf_lower_limit=0.08,
+                             imf1=1.3, imf2=2.3, imf3=2.3, vdmc=0.08, mdave=0.5, evtype=-1, masscut=150.0,
+                             sigma_smooth=0.0, min_wave_smooth=1e3, max_wave_smooth=1e4, gas_logu=-2, gas_logz=0.0,
+                             igm_factor=1.0, sfh=0, tau=1.0, const=0.0, sf_start=0.0, sf_trunc=0.0, tage=0.0,
+                             fburst=0.0, tburst=11.0, sf_slope=0.0, dust_type=0, dust_tesc=7.0, dust1=0.0, dust2=0.0,
+                             dust_clumps=-99., frac_nodust=0.0, frac_obrun=0.0, dust_index=-0.7, dust1_index=-1.0,
+                             mwr=3.1, uvb=1.0, wgp1=1, wgp2=1, wgp3=1, duste_gamma=0.01, duste_umin=1.0,
+                             duste_qpah=3.5, fagn=0.0, agn_tau=10.0, tabulated_sfh_files=None,
+                             tabulated_lsf_files=None):
         """
 
         Parameters
@@ -179,14 +148,6 @@ class FSPSSedModeler(Modeler):
             Default to False for AB magnitudes, True for Vega magnitudes
         vactoair_flag: bool
             Defaul to False for vacuum wavelengths, True for air wavelengths
-        add_agb_dust_model: bool
-            Default to True, adding AGB circumstellar dust contribution to SED
-        add_dust_emission: bool
-            Default to True, adding dust emission contribution to SED
-        add_igm_absorption: bool
-            Default to False, adding IGM absorption contribution to SED
-        add_stellar_remnants: bool
-            Default to True, adding stellar remnants contribution to stellar mass
         compute_light_ages: bool
             Default to False, computing mass-weighted (False) or light-weighted (True) ages
         cloudy_dust: bool
@@ -294,84 +255,103 @@ class FSPSSedModeler(Modeler):
 
         """
 
-        if len(tau) == 1:
-            tau = np.full(len(self.ages), tau[0])
-            const = np.full(len(self.ages), const[0])
-            sf_start = np.full(len(self.ages), sf_start[0])
-            sf_trunc = np.full(len(self.ages), sf_trunc[0])
-            fburst = np.full(len(self.ages), fburst[0])
-            tburst = np.full(len(self.ages), tburst[0])
-            sf_slope = np.full(len(self.ages), sf_slope[0])
+        if np.isscalar(tau):
+            tau = np.full(len(tage), tau)
+            const = np.full(len(tage), const)
+            sf_start = np.full(len(tage), sf_start)
+            sf_trunc = np.full(len(tage), sf_trunc)
+            fburst = np.full(len(tage), fburst)
+            tburst = np.full(len(tage), tburst)
+            sf_slope = np.full(len(tage), sf_slope)
 
-        if zred is None:
-            redshifts = np.full(len(self.ages), 0)
-        else:
-            redshifts = np.load(zred)
+        if np.isscalar(dust1):
+            dust1 = np.full(len(tage), dust1)
+        if np.isscalar(dust2):
+            dust2 = np.full(len(tage), dust2)
+        if np.isscalar(dust1_index):
+            dust1_index = np.full(len(tage), dust1_index)
+
+        if np.isscalar(duste_gamma):
+            duste_gamma = np.full(len(tage), duste_gamma)
+        if np.isscalar(duste_umin):
+            duste_umin = np.full(len(tage), duste_umin)
+        if np.isscalar(duste_qpah):
+            duste_qpah = np.full(len(tage), duste_qpah)
 
         restframe_wavelengths = {}
         restframe_seds = {}
 
         for i in self.split_tasks_by_rank(range(len(self.ages))):
-            sp = fsps.StellarPopulation(compute_vega_mags=compute_vega_mags, vactoair_flag=vactoair_flag,
-                                        zcontinuous=self.config.zcontinuous, add_agb_dust_model=add_agb_dust_model,
-                                        add_dust_emission=add_dust_emission, add_igm_absorption=add_igm_absorption,
+            sp = fsps.StellarPopulation(compute_vega_mags=compute_vega_mags,
+                                        vactoair_flag=vactoair_flag,
+                                        zcontinuous=self.config.zcontinuous,
+                                        add_agb_dust_model=self.config.add_agb_dust_model,
+                                        add_dust_emission=self.config.add_dust_emission,
+                                        add_igm_absorption=self.config.add_igm_absorption,
                                         add_neb_emission=self.config.add_neb_emission,
                                         add_neb_continuum=self.config.add_neb_continuum,
-                                        add_stellar_remnants=add_stellar_remnants,
+                                        add_stellar_remnants=self.config.add_stellar_remnants,
                                         compute_light_ages=compute_light_ages,
                                         nebemlineinspec=self.config.nebemlineinspec,
-                                        smooth_velocity=self.config.smooth_velocity, smooth_lsf=self.config.smooth_lsf,
-                                        cloudy_dust=cloudy_dust, agb_dust=agb_dust, tpagb_norm_type=tpagb_norm_type,
-                                        dell=dell, delt=delt, redgb=redgb, agb=agb, fcstar=fcstar, fbhb=fbhb,
-                                        sbss=sbss, pagb=pagb, zred=redshifts[i], zmet=zmet,
-                                        logzsol=self.metallicities[i],
+                                        smooth_velocity=self.config.smooth_velocity,
+                                        smooth_lsf=self.config.smooth_lsf,
+                                        cloudy_dust=cloudy_dust, agb_dust=agb_dust,
+                                        tpagb_norm_type=tpagb_norm_type, dell=dell, delt=delt,
+                                        redgb=redgb, agb=agb, fcstar=fcstar, fbhb=fbhb,
+                                        sbss=sbss, pagb=pagb, zred=zred[i],
+                                        zmet=zmet[i], logzsol=logzsol[i],
                                         pmetals=pmetals, imf_type=self.config.imf_type,
-                                        imf_upper_limit=imf_upper_limit, imf_lower_limit=imf_lower_limit,
-                                        imf1=imf1, imf2=imf2, imf3=imf3, vdmc=vdmc, mdave=mdave, evtype=evtype,
-                                        use_wr_spectra=use_wr_spectra, logt_wmb_hot=logt_wmb_hot, masscut=masscut,
-                                        sigma_smooth=self.velocity_dispersions[i],
+                                        imf_upper_limit=imf_upper_limit,
+                                        imf_lower_limit=imf_lower_limit, imf1=imf1, imf2=imf2,
+                                        imf3=imf3, vdmc=vdmc, mdave=mdave, evtype=evtype,
+                                        masscut=masscut, sigma_smooth=sigma_smooth[i],
                                         min_wave_smooth=self.config.min_wavelength,
                                         max_wave_smooth=self.config.max_wavelength,
-                                        gas_logu=self.gas_ionizations[i], gas_logz=self.gas_metallicities[i],
-                                        igm_factor=igm_factor, sfh=self.config.sfh_type, tau=tau[i], const=const[i],
-                                        sf_start=sf_start[i], sf_trunc=sf_trunc[i], tage=self.ages[i], fburst=fburst[i],
-                                        tburst=tburst[i], sf_slope=sf_slope[i], dust_type=self.config.dust_type,
-                                        dust_tesc=dust_tesc, dust1=self.dust_birth_cloud[i], dust2=self.dust_diffuse[i],
-                                        dust_clumps=dust_clumps, frac_nodust=frac_nodust, frac_obrun=frac_obrun,
-                                        dust_index=dust_index, dust1_index=self.dust_powerlaw_modifier[i],
+                                        gas_logu=gas_logu[i], gas_logz=gas_logz[i],
+                                        igm_factor=igm_factor, sfh=self.config.sfh_type,
+                                        tau=tau[i], const=const[i], sf_start=sf_start[i],
+                                        sf_trunc=sf_trunc[i], tage=tage[i],
+                                        fburst=fburst[i], tburst=tburst[i],
+                                        sf_slope=sf_slope[i], dust_type=self.config.dust_type,
+                                        dust_tesc=dust_tesc, dust1=dust1[i], dust2=dust2[i], dust_clumps=dust_clumps,
+                                        frac_nodust=frac_nodust, frac_obrun=frac_obrun,
+                                        dust_index=dust_index, dust1_index=dust1_index[i],
                                         mwr=mwr, uvb=uvb, wgp1=wgp1, wgp2=wgp2, wgp3=wgp3,
-                                        duste_gamma=self.dust_emission_gamma[i], duste_umin=self.dust_emission_umin[i],
-                                        duste_qpah=self.dust_emission_qpah[i], fagn=self.fraction_agn_bol_lum[i],
-                                        agn_tau=self.agn_torus_opt_depth[i])
+                                        duste_gamma=duste_gamma[i], duste_umin=duste_umin[i],
+                                        duste_qpah=duste_qpah[i],
+                                        fagn=frac_bol_lum_agn[i], agn_tau=agn_torus_opt_depths[i])
 
             if self.config.sfh_type == 3:
 
                 if self.config.zcontinuous == 3:
-                    age_array, sfr_array, metal_array = np.loadtxt(tabulated_sfh_file[i], usecols=(0, 1, 2),
-                                                                   unpack=True)
+                    #age_array, sfr_array, metal_array = np.loadtxt(tabulated_sfh_files[i], usecols=(0, 1, 2),
+                    #                                               unpack=True)
+                    age_array, sfr_array, metal_array = tabulated_sfh_files[i]
                     sp.set_tabular_sfh(age_array, sfr_array, Z=metal_array)
                 elif self.config.zcontinuous == 1:
-                    age_array, sfr_array = np.loadtxt(tabulated_sfh_file[i], usecols=(0, 1), unpack=True)
+                    #age_array, sfr_array = np.loadtxt(tabulated_sfh_file[i], usecols=(0, 1), unpack=True)
+                    age_array, sfr_array = tabulated_sfh_files[i]
                     sp.set_tabular_sfh(age_array, sfr_array, Z=None)
                 else:
                     raise ValueError
 
             if self.config.smooth_lsf:
                 assert self.config.smooth_velocity is True, 'lsf smoothing only works if smooth_velocity is True'
-                lsf_values = np.loadtxt(tabulated_lsf_file, usecols=(0, 1))
-                wave = lsf_values[:, 0]  # pragma: no cover
-                sigma = lsf_values[:, 1]  # pragma: no cover
+                # lsf_values = np.loadtxt(tabulated_lsf_file, usecols=(0, 1))
+                # wave = lsf_values[:, 0]  # pragma: no cover
+                # sigma = lsf_values[:, 1]  # pragma: no cover
+                wave, sigma = tabulated_lsf_files[i]
                 sp.set_lsf(wave, sigma, wmin=self.config.min_wavelength,
                            wmax=self.config.max_wavelength)  # pragma: no cover
 
-            restframe_wavelength, restframe_sed_Lsun_Hz = sp.get_spectrum(tage=self.ages[i], peraa=False)
+            restframe_wavelength, restframe_sed_Lsun_Hz = sp.get_spectrum(tage=tage[i], peraa=False)
 
             selected_wave_range = np.where((restframe_wavelength >= self.config.min_wavelength) &
                                            (restframe_wavelength <= self.config.max_wavelength))
             restframe_wavelength = restframe_wavelength[selected_wave_range]
             restframe_wavelengths[i] = restframe_wavelength
 
-            if physical_units:
+            if self.config.physical_units:
                 solar_luminosity = 3.826 * 10**33  # erg s^-1
                 restframe_sed_erg_s_Hz = restframe_sed_Lsun_Hz[selected_wave_range] * solar_luminosity
                 restframe_seds[i] = restframe_sed_erg_s_Hz.astype('float64')
@@ -395,18 +375,14 @@ class FSPSSedModeler(Modeler):
 
         return restframe_wavelengths, restframe_seds
 
-    def fit_model(self, compute_vega_mags=False, vactoair_flag=False, add_agb_dust_model=True,
-                  add_dust_emission=True, add_igm_absorption=False, add_stellar_remnants=True,
-                  compute_light_ages=False, cloudy_dust=False, agb_dust=1.0, tpagb_norm_type=2,
-                  dell=0.0, delt=0.0, redgb=1.0, agb=1.0, fcstar=1.0, fbhb=0.0, sbss=0.0, pagb=1.0,
-                  zmet=1, pmetals=2.0, imf_upper_limit=120, imf_lower_limit=0.08,
-                  imf1=1.3, imf2=2.3, imf3=2.3, vdmc=0.08, mdave=0.5, evtype=-1, use_wr_spectra=1,
-                  logt_wmb_hot=0.0, masscut=150.0, igm_factor=1.0, tau=np.ones(1),
-                  const=np.zeros(1), sf_start=np.zeros(1), sf_trunc=np.zeros(1), fburst=np.zeros(1),
-                  tburst=np.ones(1), sf_slope=np.zeros(1), dust_tesc=7.0, dust_clumps=-99.,
-                  frac_nodust=0.0, frac_obrun=0.0, dust_index=-0.7, mwr=3.1, uvb=1.0, wgp1=1,
-                  wgp2=1, wgp3=1, zred=None,
-                  tabulated_sfh_files=None, tabulated_lsf_file=''):
+    def fit_model(self, compute_vega_mags=False, vactoair_flag=False, compute_light_ages=False, cloudy_dust=False,
+                  agb_dust=1.0, tpagb_norm_type=2, dell=0.0, delt=0.0, redgb=1.0, agb=1.0, fcstar=1.0, fbhb=0.0,
+                  sbss=0.0, pagb=1.0, pmetals=2.0, imf_upper_limit=120, imf_lower_limit=0.08, imf1=1.3, imf2=2.3,
+                  imf3=2.3, vdmc=0.08, mdave=0.5, evtype=-1, masscut=150.0, igm_factor=1.0, tau=1.0, const=0.0,
+                  sf_start=0.0, sf_trunc=0.0, fburst=0.0, tburst=11.0, sf_slope=0.0,  dust_tesc=7.0, dust1=0.0,
+                  dust2=0.0, dust_clumps=-99., frac_nodust=0.0, frac_obrun=0.0, dust_index=-0.7, dust1_index=-1.0,
+                  mwr=3.1, uvb=1.0, wgp1=1, wgp2=1, wgp3=1, duste_gamma=0.01, duste_umin=1.0, duste_qpah=3.5,
+                  tabulated_sfh_files=None, tabulated_lsf_files=''):
         """
         Produce a creation model from which a rest-frame SED and photometry can be generated
 
@@ -419,35 +395,30 @@ class FSPSSedModeler(Modeler):
         model: ModelHandle
             ModelHandle storing the rest-frame SED model
         """
+
         self.run(compute_vega_mags=compute_vega_mags, vactoair_flag=vactoair_flag,
-                 add_agb_dust_model=add_agb_dust_model, add_dust_emission=add_dust_emission,
-                 add_igm_absorption=add_igm_absorption, add_stellar_remnants=add_stellar_remnants,
-                 compute_light_ages=compute_light_ages, cloudy_dust=cloudy_dust, agb_dust=agb_dust,
-                 tpagb_norm_type=tpagb_norm_type, dell=dell, delt=delt, redgb=redgb, agb=agb,
-                 fcstar=fcstar, fbhb=fbhb, sbss=sbss, pagb=pagb,
-                 zmet=zmet, pmetals=pmetals, imf_upper_limit=imf_upper_limit,
-                 imf_lower_limit=imf_lower_limit, imf1=imf1, imf2=imf2, imf3=imf3, vdmc=vdmc, mdave=mdave,
-                 evtype=evtype, use_wr_spectra=use_wr_spectra, logt_wmb_hot=logt_wmb_hot, masscut=masscut,
-                 igm_factor=igm_factor, tau=tau, const=const, sf_start=sf_start, sf_trunc=sf_trunc, fburst=fburst,
-                 tburst=tburst, sf_slope=sf_slope, dust_tesc=dust_tesc, dust_clumps=dust_clumps,
-                 frac_nodust=frac_nodust, frac_obrun=frac_obrun, dust_index=dust_index, mwr=mwr, uvb=uvb, wgp1=wgp1,
-                 wgp2=wgp2, wgp3=wgp3, zred=zred, tabulated_sfh_files=tabulated_sfh_files,
-                 tabulated_lsf_file=tabulated_lsf_file)
+                 compute_light_ages=compute_light_ages, cloudy_dust=cloudy_dust,
+                 agb_dust=agb_dust, tpagb_norm_type=tpagb_norm_type, dell=dell, delt=delt, redgb=redgb,
+                 agb=agb, fcstar=fcstar, fbhb=fbhb, sbss=sbss, pagb=pagb, pmetals=pmetals,
+                 imf_upper_limit=imf_upper_limit, imf_lower_limit=imf_lower_limit, imf1=imf1, imf2=imf2,
+                 imf3=imf3, vdmc=vdmc, mdave=mdave, evtype=evtype, masscut=masscut, igm_factor=igm_factor, tau=tau,
+                 const=const, sf_start=sf_start, sf_trunc=sf_trunc, fburst=fburst,
+                 tburst=tburst, sf_slope=sf_slope, dust_tesc=dust_tesc, dust1=dust1, dust2=dust2, dust_clumps=dust_clumps,
+                 frac_nodust=frac_nodust, frac_obrun=frac_obrun, dust_index=dust_index, dust1_index=dust1_index,
+                 mwr=mwr, uvb=uvb, wgp1=wgp1, wgp2=wgp2, wgp3=wgp3, duste_gamma=duste_gamma, duste_umin=duste_umin,
+                 duste_qpah=duste_qpah, tabulated_sfh_files=tabulated_sfh_files, tabulated_lsf_file=tabulated_lsf_files)
         self.finalize()
         model = self.get_handle("model")
         return model
 
-    def run(self, compute_vega_mags=False, vactoair_flag=False, add_agb_dust_model=True,
-            add_dust_emission=True, add_igm_absorption=False, add_stellar_remnants=True,
-            compute_light_ages=False, cloudy_dust=False, agb_dust=1.0, tpagb_norm_type=2,
-            dell=0.0, delt=0.0, redgb=1.0, agb=1.0, fcstar=1.0, fbhb=0.0, sbss=0.0, pagb=1.0,
-            zmet=1, pmetals=2.0, imf_upper_limit=120, imf_lower_limit=0.08,
-            imf1=1.3, imf2=2.3, imf3=2.3, vdmc=0.08, mdave=0.5, evtype=-1, use_wr_spectra=1,
-            logt_wmb_hot=0.0, masscut=150.0, igm_factor=1.0, tau=np.ones(1),
-            const=np.zeros(1), sf_start=np.zeros(1), sf_trunc=np.zeros(1), fburst=np.zeros(1),
-            tburst=np.ones(1), sf_slope=np.zeros(1), dust_tesc=7.0, dust_clumps=-99.,
-            frac_nodust=0.0, frac_obrun=0.0, dust_index=-0.7, mwr=3.1, uvb=1.0, wgp1=1,
-            wgp2=1, wgp3=1, zred=None, tabulated_sfh_files=None, tabulated_lsf_file=''):
+    def run(self, compute_vega_mags=False, vactoair_flag=False, compute_light_ages=False, cloudy_dust=False,
+            agb_dust=1.0, tpagb_norm_type=2, dell=0.0, delt=0.0, redgb=1.0, agb=1.0, fcstar=1.0, fbhb=0.0,
+            sbss=0.0, pagb=1.0, pmetals=2.0, imf_upper_limit=120, imf_lower_limit=0.08, imf1=1.3, imf2=2.3,
+            imf3=2.3, vdmc=0.08, mdave=0.5, evtype=-1, masscut=150.0, igm_factor=1.0, tau=1.0, const=0.0, sf_start=0.0,
+            sf_trunc=0.0, fburst=0.0, tburst=11.0, sf_slope=0.0, dust_tesc=7.0, dust1=0.0,
+            dust2=0.0, dust_clumps=-99., frac_nodust=0.0, frac_obrun=0.0, dust_index=-0.7, dust1_index=-1.0,
+            mwr=3.1, uvb=1.0, wgp1=1, wgp2=1, wgp3=1, duste_gamma=0.01, duste_umin=1.0, duste_qpah=3.5,
+            tabulated_sfh_files=None, tabulated_lsf_files=''):
         """
         Run method. It Calls `StellarPopulation` from FSPS to create a galaxy rest-frame SED.
 
@@ -469,37 +440,96 @@ class FSPSSedModeler(Modeler):
 
         """
 
-        if tabulated_sfh_files is None:
-            tabulated_sfh_files = []
+        data = self.get_data('input')
+
+        redshifts = data[self.config.redshifts_key][()]
+        ages = data[self.config.stellar_ages_key][()]
+        metallicities = data[self.config.stellar_metallicities_key][()]
+        velocity_dispersions = data[self.config.velocity_dispersions_key][()]
+        gas_ionizations = data[self.config.gas_ionizations_key][()]
+        gas_metallicities = data[self.config.gas_metallicities_key][()]
+
+        if self.config.sfh_type == 3:
+            tabulated_sfh_files = data[self.config.tabulated_sfh_key][()]
+        elif (self.config.sfh_type == 1) | (self.config.sfh_type == 4):
+            tau = data[self.config.tau_model_key][()][:, 0]
+            const = data[self.config.tau_model_key][()][:, 1]
+            sf_start = data[self.config.tau_model_key][()][:, 2]
+            sf_trunc = data[self.config.tau_model_key][()][:, 3]
+            fburst = data[self.config.tau_model_key][()][:, 4]
+            tburst = data[self.config.tau_model_key][()][:, 5]
+        elif self.config.sfh_type == 5:
+            tau = data[self.config.tau_model_key][()][:, 0]
+            const = data[self.config.tau_model_key][()][:, 1]
+            sf_start = data[self.config.tau_model_key][()][:, 2]
+            sf_trunc = data[self.config.tau_model_key][()][:, 3]
+            fburst = data[self.config.tau_model_key][()][:, 4]
+            tburst = data[self.config.tau_model_key][()][:, 5]
+            sf_slope = data[self.config.tau_model_key][()][:, 6]
+        else:
+            raise ValueError
+
+        if self.config.dust_type == 2:
+            dust2 = data[self.config.dust_diffuse_key][()]
+            dust1 = np.zeros_like(dust2)
+        elif self.config.dust_type == 4:
+            dust1 = data[self.config.dust_birth_cloud_key][()]
+            dust2 = data[self.config.dust_diffuse_key][()]
+            dust1_index = data[self.config.dust_powerlaw_modifier_key][()]
+        else:
+            print('Using default values for dust_type={}'.format(self.config.dust_type))
+
+        if self.config.add_dust_emission is True:
+            duste_gamma = data[self.config.dust_emission_gamma_key][()]
+            duste_umin = data[self.config.dust_emission_umin_key][()]
+            duste_qpah = data[self.config.dust_emission_qpah_key][()]
+
+        if self.config.smooth_lsf:
+            tabulated_lsf_files = data[self.config.tabulated_lsf_key][()]
+
+        frac_bol_lum_agn = data[self.config.fraction_agn_bol_lum_key][()]
+        agn_torus_opt_depths = data[self.config.agn_torus_opt_depth_key][()]
 
         wavelengths, restframe_seds = self._get_rest_frame_seds(compute_vega_mags=compute_vega_mags,
                                                                 vactoair_flag=vactoair_flag,
-                                                                add_agb_dust_model=add_agb_dust_model,
-                                                                add_dust_emission=add_dust_emission,
-                                                                add_igm_absorption=add_igm_absorption,
-                                                                add_stellar_remnants=add_stellar_remnants,
+                                                                zcontinuous=self.config.zcontinuous,
+                                                                add_agb_dust_model=self.config.add_agb_dust_model,
+                                                                add_dust_emission=self.config.add_dust_emission,
+                                                                add_igm_absorption=self.config.add_igm_absorption,
+                                                                add_neb_emission=self.config.add_neb_emission,
+                                                                add_neb_continuum=self.config.add_neb_continuum,
+                                                                add_stellar_remnants=self.config.add_stellar_remnants,
                                                                 compute_light_ages=compute_light_ages,
+                                                                nebemlineinspec=self.config.nebemlineinspec,
+                                                                smooth_velocity=self.config.smooth_velocity,
+                                                                smooth_lsf=self.config.smooth_lsf,
                                                                 cloudy_dust=cloudy_dust, agb_dust=agb_dust,
-                                                                tpagb_norm_type=tpagb_norm_type,
-                                                                dell=dell, delt=delt, redgb=redgb, agb=agb,
-                                                                fcstar=fcstar, fbhb=fbhb, sbss=sbss, pagb=pagb,
-                                                                zmet=zmet, pmetals=pmetals,
+                                                                tpagb_norm_type=tpagb_norm_type, dell=dell, delt=delt,
+                                                                redgb=redgb, agb=agb, fcstar=fcstar, fbhb=fbhb,
+                                                                sbss=sbss, pagb=pagb, zred=redshifts,
+                                                                zmet=metallicities, logzsol=redshifts,
+                                                                pmetals=pmetals, imf_type=self.config.imf_type,
                                                                 imf_upper_limit=imf_upper_limit,
-                                                                imf_lower_limit=imf_lower_limit,
-                                                                imf1=imf1, imf2=imf2, imf3=imf3, vdmc=vdmc,
-                                                                mdave=mdave, evtype=evtype,
-                                                                use_wr_spectra=use_wr_spectra,
-                                                                logt_wmb_hot=logt_wmb_hot, masscut=masscut,
-                                                                igm_factor=igm_factor, tau=tau, const=const,
-                                                                sf_start=sf_start, sf_trunc=sf_trunc, fburst=fburst,
-                                                                tburst=tburst, sf_slope=sf_slope, dust_tesc=dust_tesc,
-                                                                dust_clumps=dust_clumps, frac_nodust=frac_nodust,
-                                                                frac_obrun=frac_obrun, dust_index=dust_index, mwr=mwr,
-                                                                uvb=uvb, wgp1=wgp1, wgp2=wgp2, wgp3=wgp3,
-                                                                physical_units=self.config.physical_units,
-                                                                zred=zred,
-                                                                tabulated_sfh_file=tabulated_sfh_files,
-                                                                tabulated_lsf_file=tabulated_lsf_file)
+                                                                imf_lower_limit=imf_lower_limit, imf1=imf1, imf2=imf2,
+                                                                imf3=imf3, vdmc=vdmc, mdave=mdave, evtype=evtype,
+                                                                masscut=masscut, sigma_smooth=velocity_dispersions,
+                                                                min_wave_smooth=self.config.min_wavelength,
+                                                                max_wave_smooth=self.config.max_wavelength,
+                                                                gas_logu=gas_ionizations, gas_logz=gas_metallicities,
+                                                                igm_factor=igm_factor, sfh=self.config.sfh_type,
+                                                                tau=tau, const=const, sf_start=sf_start,
+                                                                sf_trunc=sf_trunc, tage=ages,
+                                                                fburst=fburst, tburst=tburst, sf_slope=sf_slope,
+                                                                dust_type=self.config.dust_type, dust_tesc=dust_tesc,
+                                                                dust1=dust1, dust2=dust2, dust_clumps=dust_clumps,
+                                                                frac_nodust=frac_nodust, frac_obrun=frac_obrun,
+                                                                dust_index=dust_index, dust1_index=dust1_index,
+                                                                mwr=mwr, uvb=uvb, wgp1=wgp1, wgp2=wgp2, wgp3=wgp3,
+                                                                duste_gamma=duste_gamma, duste_umin=duste_umin,
+                                                                duste_qpah=duste_qpah,
+                                                                fagn=frac_bol_lum_agn, agn_tau=agn_torus_opt_depths,
+                                                                tabulated_sfh_files=tabulated_sfh_files,
+                                                                tabulated_lsf_files=tabulated_lsf_files)
 
         if self.rank == 0:
             rest_frame_sed_models = {'wavelength': wavelengths[0], 'restframe_seds': restframe_seds} # (n_galaxies, n_wavelengths) = (100000000, 4096)
