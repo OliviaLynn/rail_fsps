@@ -1,6 +1,6 @@
 from rail.creation.engine import Creator
 from rail.core.stage import RailStage
-from rail.core.data import ModelHandle, FitsHandle
+from rail.core.data import Hdf5Handle
 from ceci.config import StageParameter as Param
 import numpy as np
 from astropy.table import Table
@@ -24,11 +24,13 @@ class FSPSPhotometryCreator(Creator):
     config_options.update(filter_data=Param(str, 'lsst_filters.npy', msg='npy file containing the structured numpy '
                                                                          'array of the survey filter wavelengths and'
                                                                          ' transmissions'),
-                          rest_frame_sed_models=Param(str, 'FSPS_sed_models.pkl',
-                                                      msg='pickle file containing the sed models generated with '
-                                                          'fsps_sed_modeler.py'),
-                          galaxy_redshifts=Param(str, 'galaxy_redshifts.npy', msg='npy file containing galaxy'
-                                                                                  ' redshifts'),
+                          rest_frame_wavelengths_key = Param(str, 'wavelength', msg='Rest-frame wavelengths dataset'
+                                                                                    'keyword name'),
+                          rest_frame_sed_models=Param(str, 'restframe_seds.hdf5',
+                                                      msg='Rest-frame seds hdf5 filename'),
+                          rest_frame_sed_models_key=Param(str, 'restframe_seds',
+                                                      msg='Rest-frame seds dataset keyword name'),
+                          redshifts_key=Param(str, 'redshifts', msg='Redshifts dataset keyword name'),
                           Om0=Param(float, 0.3, msg='Omega matter at current time'),
                           Ode0=Param(float, 0.7, msg='Omega dark energy at current time'),
                           w0=Param(float, -1, msg='Dark energy equation-of-state parameter at current time'),
@@ -39,8 +41,8 @@ class FSPSPhotometryCreator(Creator):
                           physical_units=Param(bool, False), msg='False (True) for rest-frame spectra in units of'
                                                                  'Lsun/Hz (erg/s/Hz)')
 
-    inputs = [("model", ModelHandle)]
-    outputs = [("output", FitsHandle)]
+    inputs = [("model", Hdf5Handle)]
+    outputs = [("output", Hdf5Handle)]
 
     def __init__(self, args, comm=None):
         """
@@ -78,8 +80,6 @@ class FSPSPhotometryCreator(Creator):
         self.filter_transmissions = np.array([self.filter_data[key] for key in self.filter_data.dtype.fields
                                               if 'trans' in key])
 
-        self.galaxy_redshifts = np.load(self.config.galaxy_redshifts)
-
         if not isinstance(args, dict):  # pragma: no cover
             args = vars(args)
         self.open_model(**args)
@@ -104,7 +104,7 @@ class FSPSPhotometryCreator(Creator):
             self.config["model"] = self.config.rest_frame_sed_models
             return self.model
 
-        if isinstance(self.config.rest_frame_sed_models, ModelHandle):  # pragma: no cover
+        if isinstance(self.config.rest_frame_sed_models, Hdf5Handle):  # pragma: no cover
             if self.config.rest_frame_sed_models.has_path:
                 self.config["model"] = self.config.rest_frame_sed_models.path
                 self.model = self.set_data("model", self.config.rest_frame_sed_models)
@@ -122,22 +122,23 @@ class FSPSPhotometryCreator(Creator):
 
         apparent_magnitudes = {}
 
-        for i in self.split_tasks_by_rank(range(len(self.model['restframe_seds']))):
+        for i in self.split_tasks_by_rank(range(len(self.model[self.config.rest_frame_sed_models_key]))):
 
             if self.config.physical_units:
-                restframe_sed = self.model['restframe_seds'][i]
+                restframe_sed = self.model[self.config.rest_frame_sed_models_key][i]
             else:
                 solar_luminosity_erg_s = 3.826 * 10**33
-                restframe_sed = self.model['restframe_seds'][i] * solar_luminosity_erg_s
+                restframe_sed = self.model[self.config.rest_frame_sed_models_key][i] * solar_luminosity_erg_s
 
             Mpc_in_cm = 3.08567758128 * 10 ** 24
             speed_of_light_cm_s = 2.9979245800 * 10 ** 18
-            lum_dist_cm = self.cosmology.luminosity_distance(self.galaxy_redshifts[i]).value * Mpc_in_cm
+            lum_dist_cm = self.cosmology.luminosity_distance(self.model[self.config.redshifts_key][i]).value * Mpc_in_cm
 
-            observedframe_sed_erg_s_cm2_Hz = (1 + self.galaxy_redshifts[i]) ** 2 * restframe_sed / \
-                (4 * np.pi * (1 + self.galaxy_redshifts[i]) * lum_dist_cm ** 2)
+            observedframe_sed_erg_s_cm2_Hz = (1 + self.model[self.config.redshifts_key][i]) ** 2 * restframe_sed / \
+                (4 * np.pi * (1 + self.model[self.config.redshifts_key][i]) * lum_dist_cm ** 2)
 
-            observedframe_wavelength = self.model['wavelength'] * (1 + self.galaxy_redshifts[i])
+            observedframe_wavelength = self.model[self.config.rest_frame_wavelengths_key] * \
+                (1 + self.model[self.config.redshifts_key][i])
             observedframe_wavelength_in_Hz = 2.9979245800 * 10 ** 18 / observedframe_wavelength
 
             magnitudes = []
@@ -164,7 +165,8 @@ class FSPSPhotometryCreator(Creator):
 
             apparent_magnitudes = {k: v for a in apparent_magnitudes for k, v in a.items()}
 
-        apparent_magnitudes = np.array([apparent_magnitudes[i] for i in range(len(self.model['restframe_seds']))])
+        apparent_magnitudes = np.array([apparent_magnitudes[i]
+                                        for i in range(len(self.model[self.config.rest_frame_sed_models_key]))])
 
         return apparent_magnitudes
 
@@ -209,8 +211,8 @@ class FSPSPhotometryCreator(Creator):
 
         apparent_magnitudes = self._get_apparent_magnitudes()
 
-        idxs = np.arange(1, self.galaxy_redshifts + 1, 1, dtype=int)
+        idxs = np.arange(1, self.model[self.config.redshifts_key] + 1, 1, dtype=int)
 
         if self.rank == 0:
-            output_table = Table([idxs, self.galaxy_redshifts, apparent_magnitudes], names=('id', 'z', 'app_mags'))
-            self.add_data('output', output_table)
+            output_values = {'id': idxs, 'z': self.model[self.config.redshifts_key], 'app_mags': apparent_magnitudes}
+            self.add_data('output', output_values)

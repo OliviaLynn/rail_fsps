@@ -281,7 +281,7 @@ class FSPSSedModeler(Modeler):
         restframe_wavelengths = {}
         restframe_seds = {}
 
-        for i in self.split_tasks_by_rank(range(len(self.ages))):
+        for i in self.split_tasks_by_rank(range(len(tage))):
             sp = fsps.StellarPopulation(compute_vega_mags=compute_vega_mags,
                                         vactoair_flag=vactoair_flag,
                                         zcontinuous=self.config.zcontinuous,
@@ -355,7 +355,6 @@ class FSPSSedModeler(Modeler):
                 solar_luminosity = 3.826 * 10**33  # erg s^-1
                 restframe_sed_erg_s_Hz = restframe_sed_Lsun_Hz[selected_wave_range] * solar_luminosity
                 restframe_seds[i] = restframe_sed_erg_s_Hz.astype('float64')
-
             else:
                 restframe_sed_Lsun_Hz = restframe_sed_Lsun_Hz[selected_wave_range]
                 restframe_seds[i] = restframe_sed_Lsun_Hz.astype('float64')
@@ -370,8 +369,8 @@ class FSPSSedModeler(Modeler):
             restframe_wavelengths = {k: v for a in restframe_wavelengths for k, v in a.items()}
             restframe_seds = {k: v for a in restframe_seds for k, v in a.items()}
 
-        restframe_wavelengths = np.array([restframe_wavelengths[i] for i in range(len(self.ages))])
-        restframe_seds = np.array([restframe_seds[i] for i in range(len(self.ages))])
+        restframe_wavelengths = np.array([restframe_wavelengths[i] for i in range(len(tage))])
+        restframe_seds = np.array([restframe_seds[i] for i in range(len(tage))])
 
         return restframe_wavelengths, restframe_seds
 
@@ -507,7 +506,7 @@ class FSPSSedModeler(Modeler):
                                                                 tpagb_norm_type=tpagb_norm_type, dell=dell, delt=delt,
                                                                 redgb=redgb, agb=agb, fcstar=fcstar, fbhb=fbhb,
                                                                 sbss=sbss, pagb=pagb, zred=redshifts,
-                                                                zmet=metallicities, logzsol=redshifts,
+                                                                zmet=metallicities, logzsol=metallicities,
                                                                 pmetals=pmetals, imf_type=self.config.imf_type,
                                                                 imf_upper_limit=imf_upper_limit,
                                                                 imf_lower_limit=imf_lower_limit, imf1=imf1, imf2=imf2,
@@ -532,5 +531,6 @@ class FSPSSedModeler(Modeler):
                                                                 tabulated_lsf_files=tabulated_lsf_files)
 
         if self.rank == 0:
-            rest_frame_sed_models = {'wavelength': wavelengths[0], 'restframe_seds': restframe_seds} # (n_galaxies, n_wavelengths) = (100000000, 4096)
+            rest_frame_sed_models = {'wavelength': wavelengths[0], 'restframe_seds': restframe_seds,
+                                     'redshifts': redshifts} # (n_galaxies, n_wavelengths) = (100000000, 4096)
             self.add_data('model', rest_frame_sed_models)
