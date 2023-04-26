@@ -21,7 +21,7 @@ classifiers = [
 dynamic = ["version"]
 dependencies = [
     "fsps",
-    "pz-rail",
+    "pz-rail@git+https://github.com/LSSTDESC/RAIL",
     "astropy",
 ]
 
