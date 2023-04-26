@@ -9,7 +9,7 @@ from rail.core.stage import RailStage
 import numpy as np
 
 from rail.core.utils import RAILDIR
-test_data = os.path.join(RAILDIR, 'rail', 'examples', 'testdata', 'test_fsps_sed.fits')
+test_data = os.path.join(RAILDIR, 'rail', 'examples_data', 'testdata', 'test_fsps_sed.fits')
 
 
 @pytest.mark.parametrize(
@@ -97,7 +97,7 @@ def test_FSPSSedGenerator_wrong_age_tabulated_sfh_file(settings, error):
         DS = RailStage.data_store
         DS.__class__.allow_overwrite = True
         dummy_io_data = tables_io.read(test_data)
-        sfh_file = os.path.join(RAILDIR, 'rail', 'examples', 'testdata', 'sfh_bad_age_array.dat')
+        sfh_file = os.path.join(RAILDIR, 'rail', 'examples_data', 'testdata', 'sfh_bad_age_array.dat')
         sed_generation_test = FSPSSedGenerator.make_stage(name='sed_generator_test', zcontinuous=3,
                                                           add_neb_emission=False, physical_units=True,
                                                           tabulated_sfh_file=sfh_file,
@@ -157,7 +157,7 @@ def test_FSPSSedGenerator_wrong_wavelength_tabulated_lsf_file(settings, error):
         DS = RailStage.data_store
         DS.__class__.allow_overwrite = True
         dummy_io_data = tables_io.read(test_data)
-        lsf_file = os.path.join(RAILDIR, 'rail', 'examples', 'testdata', 'lsf_bad_wave_array.dat')
+        lsf_file = os.path.join(RAILDIR, 'rail', 'examples_data', 'testdata', 'lsf_bad_wave_array.dat')
         sed_generation_test = FSPSSedGenerator.make_stage(name='sed_generator_test', smooth_velocity=True,
                                                           physical_units=True, tabulated_sfh_file=None,
                                                           tabulated_lsf_file=lsf_file,
