@@ -22,6 +22,7 @@ dynamic = ["version"]
 dependencies = [
     "fsps",
     "pz-rail",
+    "astropy",
 ]
 
 [project.optional-dependencies]
